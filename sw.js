@@ -1,6 +1,6 @@
 // Offline support. Network first (so a new deploy shows up straight away),
 // falling back to the cached copy when the gym signal drops.
-const CACHE = 'novo-tracker-v2';
+const CACHE = 'novo-tracker-v3';
 const SHELL = [
   './',
   './index.html',
