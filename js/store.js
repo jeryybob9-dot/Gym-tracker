@@ -40,7 +40,6 @@ export function normalize(raw) {
             name: c.name.trim().slice(0, 40),
             cat: typeof c.cat === 'string' ? c.cat : 'Other',
             kind: c.kind === 'bodyweight' ? 'bodyweight' : 'weight',
-            equip: 'Custom',
           }))
       : [],
     sets: raw.sets
@@ -115,7 +114,7 @@ export function setSetting(key, value) {
 }
 
 export function addCustomExercise({ name, cat, kind }) {
-  const ex = { id: `c-${uid()}`, name: name.trim().slice(0, 40), cat, kind, equip: 'Custom' };
+  const ex = { id: `c-${uid()}`, name: name.trim().slice(0, 40), cat, kind };
   state.custom.push(ex);
   commit();
   return ex;

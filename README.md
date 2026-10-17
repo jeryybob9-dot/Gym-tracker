@@ -12,11 +12,11 @@ These are real screenshots of the app, filled with ten weeks of generated sample
 
 ## What it does
 
-- **Log**: pick an exercise and set weight and reps with the −2.5 / +2.5 and −1 / +1 steppers. Last session's sets sit above the inputs (tap one to copy it), and each set you log is compared with the same set last time (+2.5 kg, +1 rep, same). There's a rest timer, and you can backfill past dates.
-- **Progress**: charts each exercise by top set, estimated 1RM or volume (max reps, added weight or total reps for bodyweight moves) over 1M / 3M / 6M / 1Y / All. The headline is written from your numbers, e.g. "Top set up 17.5 kg across 21 sessions in the last 3 months". Drag along the chart to read any session; every session is also in the table below it.
-- **Records**: bench press estimated 1RM, heaviest set, an optional goal drawn as 10 kg blocks, rep maxes, a record history and an e1RM chart. Below that, the best for every other exercise.
+- **Log**: pick an exercise and set weight and reps with the −2.5 / +2.5 and −1 / +1 steppers. Last session's sets sit above the inputs (tap one to copy it), and each set you log is compared with the same set last time (+2.5 kg, +1 rep, same). Tap a logged set to remove it. There's a rest timer, and you can backfill past dates.
+- **Progress**: charts each exercise by top set, estimated 1RM or volume (max reps, added weight or total reps for bodyweight moves) over 1M / 3M / 6M / 1Y / All. The headline is written from your numbers, e.g. "Top set up 17.5 kg across 21 sessions in the last 3 months". Drag along the chart to read any session.
+- **Records**: bench press estimated 1RM, heaviest set, an optional goal drawn as 10 kg blocks, rep maxes and your latest records, then the best for every other exercise.
 - **Record alerts**: a set that beats your previous best is marked PR, and the alert says exactly what it beat.
-- **Today**: this week's training days, sets and total kilos moved, your bench numbers, the exercises you've gone longest without, and your last two sessions.
+- **Today**: this week's training days and totals, and your bench numbers.
 - **History**: every session by month. Tap a set to edit or delete it.
 - **Settings**: kg/lb, rest timer length, bench goal, your own extra exercises, and backup export/import.
 
