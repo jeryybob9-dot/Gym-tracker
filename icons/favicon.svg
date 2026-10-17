@@ -1,44 +1,15 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
-  <defs>
-    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0" stop-color="#11141b"/>
-      <stop offset="1" stop-color="#06070a"/>
-    </linearGradient>
-    <radialGradient id="wall" cx="0.95" cy="0" r="0.8">
-      <stop offset="0" stop-color="#ff8a1f" stop-opacity="0.34"/>
-      <stop offset="1" stop-color="#ff8a1f" stop-opacity="0"/>
-    </radialGradient>
-    <linearGradient id="plate" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0" stop-color="#ffb05c"/>
-      <stop offset="1" stop-color="#ff7a0a"/>
-    </linearGradient>
-    <linearGradient id="led" x1="0" y1="0" x2="1" y2="0">
-      <stop offset="0" stop-color="#2fd8ff" stop-opacity="0"/>
-      <stop offset="0.2" stop-color="#2fd8ff"/>
-      <stop offset="0.6" stop-color="#4c6bff"/>
-      <stop offset="0.85" stop-color="#ff3d81"/>
-      <stop offset="1" stop-color="#ff3d81" stop-opacity="0"/>
-    </linearGradient>
-    <filter id="glow" x="-20%" y="-200%" width="140%" height="500%">
-      <feGaussianBlur stdDeviation="9"/>
-    </filter>
-    <filter id="oglow" x="-30%" y="-30%" width="160%" height="160%">
-      <feGaussianBlur stdDeviation="16"/>
-    </filter>
-  </defs>
-  <rect width="512" height="512" rx="112" fill="url(#bg)"/>
-  <rect width="512" height="512" rx="112" fill="url(#wall)"/>
-  <g fill="#ff8a1f" opacity="0.45" filter="url(#oglow)">
-    <rect x="146" y="160" width="40" height="192" rx="14"/>
-    <rect x="326" y="160" width="40" height="192" rx="14"/>
+  <rect width="512" height="512" rx="96" fill="#e8862a"/>
+  <g fill="#141311">
+    <rect x="171" y="78" width="10" height="356"/>
+    <rect x="331" y="78" width="10" height="356"/>
+    <rect x="136" y="122" width="240" height="38" rx="4"/>
+    <rect x="136" y="168" width="240" height="38" rx="4"/>
+    <rect x="136" y="214" width="240" height="38" rx="4"/>
+    <rect x="136" y="260" width="240" height="38" rx="4"/>
+    <rect x="136" y="306" width="240" height="38" rx="4"/>
+    <rect x="136" y="352" width="240" height="38" rx="4"/>
   </g>
-  <g fill="url(#plate)">
-    <rect x="106" y="196" width="34" height="120" rx="12"/>
-    <rect x="146" y="160" width="40" height="192" rx="14"/>
-    <rect x="186" y="242" width="140" height="28" rx="6"/>
-    <rect x="326" y="160" width="40" height="192" rx="14"/>
-    <rect x="372" y="196" width="34" height="120" rx="12"/>
-  </g>
-  <rect x="96" y="394" width="320" height="8" rx="4" fill="url(#led)" filter="url(#glow)"/>
-  <rect x="96" y="396" width="320" height="4" rx="2" fill="url(#led)"/>
+  <rect x="356" y="272" width="62" height="14" rx="2" fill="#ebe5d9"/>
+  <circle cx="420" cy="279" r="15" fill="#ebe5d9"/>
 </svg>

@@ -4,7 +4,7 @@ const KEY = 'novo-tracker:v1';
 
 const defaults = () => ({
   version: 1,
-  settings: { unit: 'kg', rest: 90, benchGoal: 100 },
+  settings: { unit: 'kg', rest: 90, benchGoal: null },
   custom: [],
   sets: [],
 });
@@ -30,7 +30,7 @@ export function normalize(raw) {
     settings: {
       unit: s.unit === 'lb' ? 'lb' : 'kg',
       rest: Number.isFinite(+s.rest) && +s.rest >= 0 ? +s.rest : d.settings.rest,
-      benchGoal: Number.isFinite(+s.benchGoal) && +s.benchGoal > 0 ? +s.benchGoal : d.settings.benchGoal,
+      benchGoal: s.benchGoal != null && +s.benchGoal > 0 ? +s.benchGoal : null,
     },
     custom: Array.isArray(raw.custom)
       ? raw.custom

@@ -23,12 +23,8 @@ export function setText(s, withUnit = false) {
   return `${w(s.w)}${u} × ${s.r}`;
 }
 
-export function compact(kg) {
-  const v = toDisplay(kg);
-  if (v >= 1e6) return `${num(v / 1e6, 1)}M`;
-  if (v >= 1e4) return `${num(v / 1e3, 1)}K`;
-  return num(v, 0);
-}
+// Whole-number load in the user's unit with separators, e.g. "17,820".
+export const whole = (kg) => num(toDisplay(kg), 0);
 
 export const ymd = (d) =>
   `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
@@ -45,13 +41,23 @@ export const addDays = (s, n) => {
 
 const sameYear = (s) => parseDay(s).getFullYear() === new Date().getFullYear();
 
+// "Thu 15 Oct" (built by hand so no locale slips a comma in), with the year when it isn't this one.
+function plainDate(s) {
+  const d = parseDay(s);
+  const part = (o) => d.toLocaleDateString('en-GB', o);
+  return `${part({ weekday: 'short' })} ${d.getDate()} ${part({ month: 'short' })}${sameYear(s) ? '' : ` ${d.getFullYear()}`}`;
+}
+
 export function dayLabel(s) {
   if (s === today()) return 'Today';
   if (s === addDays(today(), -1)) return 'Yesterday';
-  return parseDay(s).toLocaleDateString('en-GB', {
-    weekday: 'short', day: 'numeric', month: 'short', ...(sameYear(s) ? {} : { year: 'numeric' }),
-  });
+  return plainDate(s);
 }
+
+// For use inside sentences: "today", "yesterday" or "on Thu 15 Oct" / "since Thu 15 Oct".
+const relative = (s) => (s === today() ? 'today' : s === addDays(today(), -1) ? 'yesterday' : null);
+export const onDay = (s) => relative(s) || `on ${plainDate(s)}`;
+export const sinceDay = (s) => `since ${relative(s) || plainDate(s)}`;
 
 export const shortDate = (s) =>
   parseDay(s).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', ...(sameYear(s) ? {} : { year: '2-digit' }) });

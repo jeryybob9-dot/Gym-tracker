@@ -1,7 +1,6 @@
-// Single-series time chart drawn as SVG: 2px line, faint area wash, hairline grid,
-// end + best direct labels, and a touch/keyboard crosshair with a tooltip.
+// Single-series time chart drawn as SVG: 2px line, hairline grid, direct labels on the
+// latest and best sessions, and a touch/keyboard crosshair with a readout.
 const NS = 'http://www.w3.org/2000/svg';
-let gradientId = 0;
 
 function el(tag, attrs, parent) {
   const n = document.createElementNS(NS, tag);
@@ -28,15 +27,15 @@ const fmtDate = (ms, long) =>
 
 /**
  * points: [{ x: ms, y: number, sub: string }] oldest first.
- * tick(v) formats axis numbers; value(v) formats the tooltip/labels (with unit).
+ * tick(v) formats axis numbers; value(v) formats labels and the readout (with unit).
  */
-export function lineChart(host, points, { tick = String, value = String, label = '', height = 210 } = {}) {
+export function lineChart(host, points, { tick = String, value = String, label = '', height = 200 } = {}) {
   host.replaceChildren();
   if (!points.length) return;
 
   const W = Math.max(260, Math.round(host.clientWidth || 320));
   const H = height;
-  const pad = { t: 26, r: 14, b: 26, l: 40 };
+  const pad = { t: 24, r: 10, b: 24, l: 36 };
   const ys = points.map((p) => p.y);
   const yMin = Math.min(...ys);
   const yMax = Math.max(...ys);
@@ -62,66 +61,53 @@ export function lineChart(host, points, { tick = String, value = String, label =
   const base = H - pad.b;
 
   const svg = el('svg', { viewBox: `0 0 ${W} ${H}`, width: W, height: H, role: 'img', 'aria-label': label });
-  const gid = `area-${++gradientId}`;
-  const defs = el('defs', {}, svg);
-  const grad = el('linearGradient', { id: gid, x1: 0, y1: 0, x2: 0, y2: 1 }, defs);
-  el('stop', { offset: '0%', style: 'stop-color:var(--chart);stop-opacity:.16' }, grad);
-  el('stop', { offset: '100%', style: 'stop-color:var(--chart);stop-opacity:0' }, grad);
 
-  // Grid + y ticks
   const grid = el('g', { class: 'c-grid' }, svg);
   for (let v = lo; v <= hi + step / 2; v += step) {
     const y = Math.round(sy(v)) + 0.5;
     el('line', { x1: pad.l, x2: W - pad.r, y1: y, y2: y }, grid);
-    text(grid, pad.l - 8, y + 4, tick(v), { 'text-anchor': 'end', class: 'c-tick' });
+    text(grid, pad.l - 7, y + 4, tick(v), { 'text-anchor': 'end', class: 'c-tick' });
   }
 
-  // X labels: first, last and up to two between, spaced in time.
+  // X labels: first, last and one or two between, spaced in time.
   const longSpan = x1 - x0 > 300 * 864e5;
   const xTicks = x1 === x0 ? [x0] : [0, 1 / 3, 2 / 3, 1].map((f) => x0 + (x1 - x0) * f);
   const shown = plotW < 300 && xTicks.length === 4 ? [xTicks[0], xTicks[2], xTicks[3]] : xTicks;
   shown.forEach((x, i) => {
     const anchor = shown.length === 1 ? 'middle' : i === 0 ? 'start' : i === shown.length - 1 ? 'end' : 'middle';
-    text(svg, sx(x), H - 6, fmtDate(x, longSpan), { 'text-anchor': anchor, class: 'c-tick' });
+    text(svg, sx(x), H - 5, fmtDate(x, longSpan), { 'text-anchor': anchor, class: 'c-tick' });
   });
 
-  // Area + line
   const pts = points.map((p) => [sx(p.x), sy(p.y)]);
-  const line = pts.map((p, i) => `${i ? 'L' : 'M'}${p[0].toFixed(1)} ${p[1].toFixed(1)}`).join('');
   if (pts.length > 1) {
-    el('path', { d: `${line}L${pts[pts.length - 1][0].toFixed(1)} ${base}L${pts[0][0].toFixed(1)} ${base}Z`, fill: `url(#${gid})` }, svg);
-    el('path', { d: line, class: 'c-glow' }, svg);
-    el('path', { d: line, class: 'c-line' }, svg);
+    el('path', { d: pts.map((p, i) => `${i ? 'L' : 'M'}${p[0].toFixed(1)} ${p[1].toFixed(1)}`).join(''), class: 'c-line' }, svg);
   }
 
-  // Markers: every point when sparse, otherwise only the best and the latest.
+  // Markers: every session when sparse, otherwise only the best and the latest.
   const last = points.length - 1;
   let bestI = 0;
   ys.forEach((y, i) => { if (y >= ys[bestI]) bestI = i; });
-  const dots = el('g', {}, svg);
   points.forEach((p, i) => {
     if (points.length <= 20 || i === last || i === bestI) {
-      el('circle', { cx: pts[i][0], cy: pts[i][1], r: i === last ? 5 : 4, class: i === last ? 'c-dot c-dot-end' : 'c-dot' }, dots);
+      el('circle', { cx: pts[i][0], cy: pts[i][1], r: i === last ? 5 : 4, class: 'c-dot' }, svg);
     }
   });
 
-  // Direct labels: latest value, plus the best if it's elsewhere and not crowding.
   const labelAt = (i, str, cls) => {
     const [x, y] = pts[i];
     const anchor = x > W - 60 ? 'end' : x < pad.l + 40 ? 'start' : 'middle';
-    const ly = y - 12 < 12 ? y + 20 : y - 12;
+    const ly = y - 11 < 12 ? y + 21 : y - 11;
     text(svg, x + (anchor === 'end' ? 4 : anchor === 'start' ? -4 : 0), ly, str, { 'text-anchor': anchor, class: cls });
   };
   labelAt(last, value(points[last].y), 'c-label');
   if (bestI !== last && Math.abs(pts[bestI][0] - pts[last][0]) > 70 && points[bestI].y > points[last].y) {
-    labelAt(bestI, `Best ${value(points[bestI].y)}`, 'c-label c-label-best');
+    labelAt(bestI, `best ${value(points[bestI].y)}`, 'c-label c-label-best');
   }
 
-  // Crosshair layer
-  const cross = el('g', { class: 'c-cross', visibility: 'hidden' }, svg);
+  const cross = el('g', { visibility: 'hidden' }, svg);
   const vline = el('line', { y1: pad.t - 6, y2: base, class: 'c-xhair' }, cross);
-  const hdot = el('circle', { r: 5.5, class: 'c-dot c-dot-hover' }, cross);
-  const hit = el('rect', { x: pad.l - 10, y: 0, width: plotW + 20, height: H, fill: 'transparent', tabindex: 0, class: 'c-hit', 'aria-label': `${label}. Use left and right arrows to read values.` }, svg);
+  const hdot = el('circle', { r: 5.5, class: 'c-dot c-dot-on' }, cross);
+  const hit = el('rect', { x: pad.l - 10, y: 0, width: plotW + 20, height: H, fill: 'transparent', tabindex: 0, class: 'c-hit', 'aria-label': `${label}. Left and right arrow keys read each session.` }, svg);
 
   host.appendChild(svg);
   const tip = document.createElement('div');
@@ -130,7 +116,6 @@ export function lineChart(host, points, { tick = String, value = String, label =
   const tipV = document.createElement('strong');
   const tipD = document.createElement('span');
   const tipS = document.createElement('span');
-  tipS.className = 'c-tip-sub';
   tip.append(tipV, tipD, tipS);
   host.appendChild(tip);
 

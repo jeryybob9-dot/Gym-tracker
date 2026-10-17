@@ -3,7 +3,6 @@ import * as S from './stats.js';
 import * as F from './format.js';
 import { allExercises, exerciseById, categories, CATEGORIES, BENCH_ID } from './exercises.js';
 import { lineChart } from './chart.js';
-import { icon } from './icons.js';
 
 const $ = (sel, root = document) => root.querySelector(sel);
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
@@ -14,21 +13,22 @@ const parseNum = (v) => {
 // Plain number for an <input>, in the user's unit, no thousands separators.
 const inputW = (kg) => String(Math.round(F.toDisplay(kg) * 100) / 100);
 const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
+const daysSince = (d) => Math.round((F.parseDay(F.today()) - F.parseDay(d)) / 864e5);
+const longDate = (d) => F.parseDay(d).toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long' });
 
 const TABS = [
-  { id: 'home', label: 'Home', icon: 'home' },
-  { id: 'progress', label: 'Progress', icon: 'chart' },
-  { id: 'log', label: 'Log', icon: 'plus', center: true },
-  { id: 'prs', label: 'PRs', icon: 'trophy' },
-  { id: 'history', label: 'History', icon: 'clock' },
+  { id: 'home', label: 'Today' },
+  { id: 'progress', label: 'Progress' },
+  { id: 'log', label: 'Log', primary: true },
+  { id: 'prs', label: 'Records' },
+  { id: 'history', label: 'History' },
 ];
-const CAT_TINT = { Back: 'cyan', Biceps: 'orange', Triceps: 'pink', Chest: 'blue', Shoulders: 'violet' };
 
 const METRICS = {
   weight: [
     { id: 'top', label: 'Top set', get: (s) => s.top.w, fmt: F.w, unit: true, sub: (s) => `Top set ${F.setText(s.top, true)}` },
     { id: 'e1rm', label: 'Est. 1RM', get: (s) => s.e1rm, fmt: F.w, unit: true, sub: (s) => `From ${F.setText(s.e1rmSet, true)}` },
-    { id: 'volume', label: 'Volume', get: (s) => s.volume, fmt: F.compact, unit: true, sub: (s) => `${plural(s.sets.length, 'set')} · ${s.reps} reps` },
+    { id: 'volume', label: 'Volume', get: (s) => s.volume, fmt: F.whole, unit: true, sub: (s) => `${plural(s.sets.length, 'set')}, ${s.reps} reps` },
   ],
   bodyweight: [
     { id: 'reps', label: 'Max reps', get: (s) => s.maxRep.r, fmt: (v) => F.num(v, 0), unit: false, sub: (s) => `Best set ${F.setText(s.maxRep, true)}` },
@@ -36,7 +36,13 @@ const METRICS = {
     { id: 'total', label: 'Total reps', get: (s) => s.reps, fmt: (v) => F.num(v, 0), unit: false, sub: (s) => plural(s.sets.length, 'set') },
   ],
 };
-const RANGES = [['1m', '1M', 30], ['3m', '3M', 91], ['6m', '6M', 182], ['1y', '1Y', 365], ['all', 'All', Infinity]];
+const RANGES = [
+  ['1m', '1M', 30, 'the last month'],
+  ['3m', '3M', 91, 'the last 3 months'],
+  ['6m', '6M', 182, 'the last 6 months'],
+  ['1y', '1Y', 365, 'the last year'],
+  ['all', 'All', Infinity, null],
+];
 
 // ---------- UI state (view prefs survive reloads; the log date is per visit) ----------
 const PREFS_KEY = 'novo-tracker:ui';
@@ -61,39 +67,44 @@ function savePrefs() {
 const logDate = () => (ui.logDate && ui.logDate < F.today() ? ui.logDate : F.today());
 const setLogDate = (d) => { ui.logDate = d && d < F.today() ? d : null; };
 
-// ---------- Shared bits ----------
-const tintOf = (ex) => `tint-${CAT_TINT[ex.cat] || 'orange'}`;
-const exIcon = (ex) => `<span class="ex-ico ${tintOf(ex)}">${icon(ex.kind === 'bodyweight' ? 'bolt' : 'dumbbell')}</span>`;
+// ---------- Shared pieces ----------
+// Station number: each exercise's fixed position in the full list, like a numbered machine.
+const stationNo = (exId) => String(allExercises().findIndex((e) => e.id === exId) + 1).padStart(2, '0');
 
-const wordmark = () => `
-  <div class="brand" role="img" aria-label="Novo Tracker, Welling">
-    <span class="wm">NOVO</span>
-    <span class="wm-bars" aria-hidden="true"><i></i><i></i><i></i></span>
-    <span class="wm-sub" aria-hidden="true">Tracker<em>Welling</em></span>
+const sec = (title, link = '') => `<div class="sec"><h2>${esc(title)}</h2>${link}</div>`;
+
+const head = (kicker, title, lede = '') => `
+  <header class="head">
+    <p class="kicker">${esc(kicker)}</p>
+    <h1>${title}</h1>
+    ${lede ? `<p class="lede">${lede}</p>` : ''}
+  </header>`;
+
+const opts = (action, options, current, label) => `
+  <div class="opts" role="radiogroup" aria-label="${esc(label)}">
+    ${options.map(([v, t]) => `<button type="button" role="radio" aria-checked="${String(v) === String(current)}" data-action="${action}" data-v="${esc(v)}">${esc(t)}</button>`).join('')}
   </div>`;
 
-const datePicker = (d, id) => `
-  <label class="date-pill">${icon('calendar')}<span>${esc(F.dayLabel(d))}</span>
+const dateButton = (d, id) => `
+  <label class="date-btn"><span>${esc(F.dayLabel(d))}</span><em>Change</em>
     <input type="date" id="${id}" value="${d}" max="${F.today()}" aria-label="Workout date">
   </label>`;
 
-const seg = (action, options, current, label) => `
-  <div class="seg" role="radiogroup" aria-label="${esc(label)}">
-    ${options.map(([v, text]) => `<button type="button" role="radio" aria-checked="${String(v) === String(current)}" data-action="${action}" data-v="${esc(v)}">${esc(text)}</button>`).join('')}
-  </div>`;
-
-const stepperHTML = (id, kind, label, value, hint = '') => `
-  <div class="stepper">
-    <label class="stepper-label" for="${id}">${esc(label)}</label>
-    <div class="stepper-row">
-      <button type="button" class="step" data-step="${id}" data-kind="${kind}" data-dir="-1" aria-label="Decrease ${esc(label)}">${icon('minus')}</button>
-      <input id="${id}" class="step-input" type="text" inputmode="${kind === 'r' ? 'numeric' : 'decimal'}" autocomplete="off" enterkeyhint="${kind === 'r' ? 'done' : 'next'}" value="${esc(value)}">
-      <button type="button" class="step" data-step="${id}" data-kind="${kind}" data-dir="1" aria-label="Increase ${esc(label)}">${icon('plus')}</button>
+const dial = (id, kind, label, unitLabel, value, hint = '') => {
+  const step = kind === 'r' ? '1' : F.num(F.stepSize(), 1);
+  return `
+  <div class="dial dial-${kind}">
+    <label for="${id}">${esc(label)}<span>${esc(unitLabel)}</span></label>
+    <input id="${id}" class="dial-n" type="text" inputmode="${kind === 'r' ? 'numeric' : 'decimal'}" autocomplete="off" enterkeyhint="${kind === 'r' ? 'done' : 'next'}" value="${esc(value)}">
+    <div class="dial-steps">
+      <button type="button" data-step="${id}" data-kind="${kind}" data-dir="-1" aria-label="${esc(label)} minus ${step}">−${step}</button>
+      <button type="button" data-step="${id}" data-kind="${kind}" data-dir="1" aria-label="${esc(label)} plus ${step}">+${step}</button>
     </div>
-    ${hint ? `<p class="stepper-hint">${esc(hint)}</p>` : ''}
+    ${hint ? `<p class="dial-hint">${esc(hint)}</p>` : ''}
   </div>`;
+};
 
-function wireSteppers(root, onChange) {
+function wireDials(root, onChange) {
   root.addEventListener('click', (e) => {
     const b = e.target.closest('[data-step]');
     if (!b) return;
@@ -104,58 +115,79 @@ function wireSteppers(root, onChange) {
     input.value = reps ? String(Math.max(1, Math.round(next))) : String(Math.max(0, Math.round(next * 100) / 100));
     onChange?.();
   });
-  root.addEventListener('input', (e) => { if (e.target.matches('.step-input')) onChange?.(); });
+  root.addEventListener('input', (e) => { if (e.target.matches('.dial-n')) onChange?.(); });
 }
 
 function invalid(input, msg) {
-  input.closest('.stepper')?.classList.remove('shake');
+  const box = input.closest('.dial');
+  box?.classList.remove('shake');
   void input.offsetWidth;
-  input.closest('.stepper')?.classList.add('shake');
+  box?.classList.add('shake');
   toast(msg);
 }
 
 function readSet(wInput, rInput) {
   const w = parseNum(wInput.value);
   const r = parseNum(rInput.value);
-  if (!Number.isFinite(w) || w < 0) return invalid(wInput, 'Enter a weight (0 or more)');
-  if (!Number.isInteger(r) || r < 1) return invalid(rInput, 'Reps must be a whole number');
+  if (!Number.isFinite(w) || w < 0) return invalid(wInput, 'Enter a weight, 0 or more.');
+  if (!Number.isInteger(r) || r < 1) return invalid(rInput, 'Reps must be a whole number, 1 or more.');
   return { w: F.fromDisplay(w), r };
 }
 
-function goalMeter(val, goal) {
-  const pct = Math.min(100, (val / goal) * 100);
-  const left = goal - val;
-  return `
-    <div class="meter" role="meter" aria-label="Progress to bench goal" aria-valuemin="0" aria-valuemax="${goal.toFixed(1)}" aria-valuenow="${val.toFixed(1)}"><i style="width:${pct.toFixed(1)}%"></i></div>
-    <div class="meter-foot"><span>${left > 0.05 ? `${F.wu(left)} to go` : 'Goal smashed — set a new one'}</span><span>Goal ${F.wu(goal)}</span></div>`;
+// "Low Pulley Row, Pull Ups and 4 more"
+function exerciseNames(ids) {
+  const names = ids.map((id) => exerciseById(id).name);
+  if (names.length <= 2) return names.join(' and ');
+  return `${names.slice(0, 2).join(', ')} and ${names.length - 2} more`;
 }
 
-function dayCard(day, prs) {
-  const groups = [...day.groups];
+// Bench goal as a row of 10 kg (20 lb) blocks, filled up to the current estimated 1RM.
+function goalStack(val, goal) {
+  const step = F.unit() === 'lb' ? 20 : 10;
+  const g = F.toDisplay(goal);
+  const v = F.toDisplay(val);
+  const blocks = [];
+  for (let start = 0; start < g - 1e-9; start += step) {
+    let end = Math.min(start + step, g);
+    if (g - end < step * 0.35) end = g;
+    const fill = Math.max(0, Math.min(1, (v - start) / (end - start)));
+    blocks.push(`<i style="flex:${((end - start) / step).toFixed(3)}"><b style="width:${(fill * 100).toFixed(1)}%"></b></i>`);
+    if (end === g) break;
+  }
   return `
-  <article class="card day">
-    <header class="day-head">
+    <div class="stack" role="meter" aria-label="Estimated 1RM against goal" aria-valuemin="0" aria-valuemax="${g.toFixed(1)}" aria-valuenow="${v.toFixed(1)}">${blocks.join('')}</div>
+    <p class="stack-scale"><span>0</span><span>Each block ${step} ${F.unit()}</span><span>${F.num(g, 1)}</span></p>`;
+}
+
+function setButton(s, prs) {
+  const pr = prs.has(s.id);
+  return `<button type="button" class="set${pr ? ' pr' : ''}" data-action="edit-set" data-id="${esc(s.id)}" aria-label="Edit set ${esc(F.setText(s, true))}${pr ? ', personal record' : ''}">${esc(F.setText(s))}${pr ? '<span class="pr-tag">PR</span>' : ''}</button>`;
+}
+
+function dayBlock(day, prs) {
+  return `
+  <article class="day">
+    <header class="day-h">
       <h3>${esc(F.dayLabel(day.d))}</h3>
-      <p>${plural(day.sets.length, 'set')} · ${F.compact(day.volume)} ${F.unit()}</p>
+      <span>${plural(day.sets.length, 'set')} · ${F.whole(day.volume)} ${F.unit()}</span>
     </header>
-    ${groups.map(([exId, sets]) => `
+    ${[...day.groups].map(([exId, sets]) => `
       <div class="day-ex">
         <div class="day-ex-name">${esc(exerciseById(exId).name)}</div>
-        <div class="set-chips">${sets.map((s) => `<button type="button" class="set-chip${prs.has(s.id) ? ' is-pr' : ''}" data-action="edit-set" data-id="${esc(s.id)}" aria-label="Edit set ${esc(F.setText(s, true))}">${esc(F.setText(s))}${prs.has(s.id) ? '<b>PR</b>' : ''}</button>`).join('')}</div>
+        <div class="sets">${sets.map((s) => setButton(s, prs)).join('')}</div>
       </div>`).join('')}
   </article>`;
 }
 
-function installHint() {
+function installNotice() {
   const ios = /iphone|ipad|ipod/i.test(navigator.userAgent);
   const standalone = navigator.standalone || matchMedia('(display-mode: standalone)').matches;
   if (!ios || standalone || ui.hideInstall) return '';
   return `
-  <section class="card install">
-    <span class="install-ico">${icon('share')}</span>
-    <p><b>Add to your Home Screen</b><br>Tap <b>Share</b>, then <b>Add to Home Screen</b> for a full-screen app that works offline.</p>
-    <button type="button" class="icon-btn sm" data-action="hide-install" aria-label="Dismiss">${icon('x')}</button>
-  </section>`;
+  <aside class="notice">
+    <p>To install: tap <b>Share</b> in Safari, then <b>Add to Home Screen</b>. It opens full screen and keeps working when the gym signal drops.</p>
+    <button type="button" class="text-btn" data-action="hide-install">Dismiss</button>
+  </aside>`;
 }
 
 // ---------- Views ----------
@@ -163,70 +195,92 @@ let mounts = [];
 const onMount = (fn) => mounts.push(fn);
 
 function viewHome() {
+  const t = F.today();
+  const days = S.trainingDays();
+  const todayDay = days.find((d) => d.d === t);
+  const lastDay = days.find((d) => d.d < t);
   const wk = S.weekSummary();
   const streak = S.weekStreak();
-  const todayCount = S.setsToday().length;
-  const days = S.trainingDays().slice(0, 3);
   const prs = S.prMap();
-  const t = F.today();
-  const hour = new Date().getHours();
-  const greet = hour < 12 ? 'Good morning' : hour < 18 ? 'Good afternoon' : 'Good evening';
+
+  let lede;
+  if (todayDay) lede = `<b>${plural(todayDay.sets.length, 'set')}</b> logged so far today: ${esc(exerciseNames([...todayDay.groups.keys()]))}.`;
+  else if (lastDay) lede = `Last trained <b>${esc(F.ago(lastDay.d))}</b>: ${esc(exerciseNames([...lastDay.groups.keys()]))}.`;
+  else lede = 'Nothing logged yet. Tap <b>Log</b>, pick an exercise and enter your first set. Everything else on this screen builds from that.';
+
   const letters = ['M', 'T', 'W', 'T', 'F', 'S', 'S'];
+  const due = allExercises()
+    .map((ex) => {
+      const sets = S.setsOf(ex.id);
+      return sets.length ? { ex, last: sets[sets.length - 1], days: daysSince(sets[sets.length - 1].d) } : null;
+    })
+    .filter((x) => x && x.days > 0)
+    .sort((a, b) => b.days - a.days)
+    .slice(0, 4);
+
   return `
-  <header class="top">
-    ${wordmark()}
-    <button type="button" class="icon-btn" data-action="settings" aria-label="Settings">${icon('sliders')}</button>
-  </header>
-  <p class="greet"><b>${greet}.</b> ${esc(new Date().toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long' }))}</p>
-  ${installHint()}
-  <section class="card led">
-    <div class="card-head">
-      <h2 class="eyebrow">This week</h2>
-      ${streak ? `<span class="pill pill-hot">${icon('flame')}${streak}-week streak</span>` : ''}
-    </div>
-    <ol class="week-strip">
-      ${wk.days.map((d, i) => `<li class="${wk.trained.has(d) ? 'on' : ''}${d === t ? ' today' : ''}" aria-label="${esc(F.parseDay(d).toLocaleDateString('en-GB', { weekday: 'long' }))}${wk.trained.has(d) ? ', trained' : ''}"><span>${letters[i]}</span><i></i></li>`).join('')}
+  <div class="mast">
+    <div class="brand" aria-label="Novo Tracker, Welling"><span class="brand-block">NOVO</span><span class="brand-txt">Tracker<br>Welling</span></div>
+    <button type="button" class="text-btn" data-action="settings">Settings</button>
+  </div>
+  ${head(F.parseDay(t).toLocaleDateString('en-GB', { weekday: 'long' }), esc(F.parseDay(t).toLocaleDateString('en-GB', { day: 'numeric', month: 'long' })), lede)}
+  ${installNotice()}
+  <a class="act" href="#log"><span>${todayDay ? 'Carry on logging' : 'Log a workout'}</span>${todayDay ? `<small>${plural(todayDay.sets.length, 'set')} today</small>` : ''}</a>
+
+  <section class="block">
+    ${sec('This week', streak > 1 ? `<span class="sec-note">${streak} weeks in a row</span>` : '')}
+    <ol class="week">
+      ${wk.days.map((d, i) => `<li class="${wk.trained.has(d) ? 'on' : ''}${d === t ? ' today' : ''}" aria-label="${esc(longDate(d))}${wk.trained.has(d) ? ', trained' : ''}"><span class="wk-d">${letters[i]}</span><span class="wk-n">${F.parseDay(d).getDate()}</span></li>`).join('')}
     </ol>
-    <div class="stats3">
-      <div class="stat"><div class="stat-v">${wk.trained.size}</div><div class="stat-l">Sessions</div></div>
-      <div class="stat"><div class="stat-v">${wk.sets}</div><div class="stat-l">Sets</div></div>
-      <div class="stat"><div class="stat-v">${F.compact(wk.volume)}</div><div class="stat-l">Volume · ${F.unit()}</div></div>
-    </div>
+    <p class="week-sum">${wk.sets
+      ? `<b>${plural(wk.trained.size, 'session')}</b>, <b>${plural(wk.sets, 'set')}</b> and <b>${F.whole(wk.volume)} ${F.unit()}</b> moved since Monday.`
+      : 'No sessions since Monday yet.'}</p>
   </section>
-  <a class="btn btn-primary btn-xl" href="#log">${icon('dumbbell')}<span>${todayCount ? `Continue workout · ${plural(todayCount, 'set')}` : 'Start workout'}</span></a>
-  ${benchCard()}
-  ${days.length
-    ? `<h2 class="section-title">Recent sessions <a href="#history">See all</a></h2>${days.map((d) => dayCard(d, prs)).join('')}`
-    : `<section class="card welcome">
-        <h2>Let’s get started</h2>
-        <ol class="steps">
-          <li>Tap <b>Log</b> and pick an exercise.</li>
-          <li>Enter weight and reps, then hit <b>Log set</b>.</li>
-          <li>Watch your lifts climb in <b>Progress</b> and <b>PRs</b>.</li>
-        </ol>
-      </section>`}`;
+
+  ${benchBlock()}
+
+  ${due.length ? `
+  <section class="block">
+    ${sec('Longest since you trained')}
+    <ul class="rows">
+      ${due.map(({ ex, last, days: n }) => `
+        <li><button type="button" class="row" data-action="open-ex" data-ex="${esc(ex.id)}">
+          <span class="row-no">${stationNo(ex.id)}</span>
+          <span><span class="row-name">${esc(ex.name)}</span><span class="row-meta">Last: ${esc(F.setText(last, true))} on ${esc(F.shortDate(last.d))}</span></span>
+          <span class="row-val">${n}<small>${n === 1 ? 'day' : 'days'}</small></span>
+        </button></li>`).join('')}
+    </ul>
+  </section>` : ''}
+
+  ${days.length ? `
+  <section class="block">
+    ${sec('Recent sessions', '<a href="#history">History</a>')}
+    ${days.slice(0, 2).map((d) => dayBlock(d, prs)).join('')}
+  </section>` : ''}`;
 }
 
-function benchCard() {
+function benchBlock() {
   const b = S.bestsOf(BENCH_ID);
   const goal = store.getState().settings.benchGoal;
   if (!b) {
     return `
-    <section class="card pr-card">
-      <div class="card-head"><h2 class="eyebrow">${icon('trophy')} Bench press PR</h2></div>
-      <p class="note">No bench sets yet. Log a Flat Bench Press and your PRs show up here.</p>
-      <button type="button" class="btn" data-action="open-ex" data-ex="${BENCH_ID}">${icon('plus')} Log bench press</button>
+    <section class="block">
+      ${sec('Bench press')}
+      <p class="note">No bench sets yet. Your estimated 1RM, heaviest set and goal progress appear here after the first one.</p>
+      <button type="button" class="btn" data-action="open-ex" data-ex="${BENCH_ID}">Log flat bench press</button>
     </section>`;
   }
   return `
-  <a class="card pr-card" href="#prs" aria-label="Bench press PRs">
-    <div class="card-head"><h2 class="eyebrow">${icon('trophy')} Bench press PR</h2>${icon('chev', 'muted')}</div>
-    <div class="pr-pair">
-      <div><div class="big">${F.w(b.e1rm)}<small>${F.unit()}</small></div><div class="lbl">Est. 1RM</div></div>
-      <div><div class="big">${F.w(b.heavy.w)}<small>× ${b.heavy.r}</small></div><div class="lbl">Heaviest set · ${esc(F.shortDate(b.heavy.d))}</div></div>
-    </div>
-    ${goalMeter(b.e1rm, goal)}
-  </a>`;
+  <section class="block">
+    ${sec('Bench press', '<a href="#prs">Records</a>')}
+    <p class="figure"><span class="fig-n">${F.w(b.e1rm)}</span><span class="fig-u">${F.unit()}</span><span class="fig-l">est. 1RM</span></p>
+    <p class="fig-src">From ${esc(F.setText(b.est, true))} ${esc(F.onDay(b.est.d))}.</p>
+    <dl class="facts">
+      <div><dt>Heaviest set</dt><dd>${esc(F.setText(b.heavy, true))}</dd><dd class="when">${esc(F.shortDate(b.heavy.d))}</dd></div>
+      ${goal ? `<div><dt>Goal</dt><dd>${esc(F.wu(goal))}</dd><dd class="when">${b.e1rm >= goal ? 'reached' : `${esc(F.wu(goal - b.e1rm))} to go`}</dd></div>` : ''}
+    </dl>
+    ${goal ? goalStack(b.e1rm, goal) : `<p class="note">No goal set. <button type="button" class="text-btn inline" data-action="edit-goal">Set a bench goal</button></p>`}
+  </section>`;
 }
 
 function viewLog() {
@@ -235,35 +289,56 @@ function viewLog() {
   const list = allExercises().filter((e) => ui.logCat === 'All' || e.cat === ui.logCat);
   const daySets = store.getState().sets.filter((s) => s.d === d);
   const day = S.trainingDays().find((x) => x.d === d);
+  const lede = day
+    ? `<b>${plural(day.sets.length, 'set')}</b> and <b>${F.whole(day.volume)} ${F.unit()}</b> logged${d === F.today() ? ' so far' : ''}.`
+    : `Nothing logged ${d === F.today() ? 'yet today' : 'on this day'}. Pick an exercise below.`;
   return `
-  <header class="page-head">
-    <div><p class="eyebrow">Log workout</p><h1>${esc(F.dayLabel(d))}</h1></div>
-    ${datePicker(d, 'log-date')}
-  </header>
-  ${day ? dayCard(day, S.prMap()) : ''}
-  <div class="chips" role="tablist" aria-label="Muscle group">
-    ${cats.map((c) => `<button type="button" class="chip${c === ui.logCat ? ' on' : ''}" role="tab" aria-selected="${c === ui.logCat}" data-action="log-cat" data-cat="${esc(c)}">${esc(c)}</button>`).join('')}
-  </div>
-  <div class="ex-list">
-    ${list.map((ex) => {
-      const n = daySets.filter((s) => s.ex === ex.id).length;
-      const last = S.lastSessionBefore(ex.id, d);
-      const meta = last ? `Last: ${F.setText(last.top, true)} · ${F.ago(last.d)}` : ex.equip;
-      return `
-      <button type="button" class="ex-card" data-action="open-ex" data-ex="${esc(ex.id)}">
-        ${exIcon(ex)}
-        <span class="ex-main"><span class="ex-name">${esc(ex.name)}</span><span class="ex-meta">${esc(meta)}</span></span>
-        ${n ? `<span class="ex-count" aria-label="${plural(n, 'set')} logged">${n}</span>` : ''}
-        ${icon('chev', 'ex-chev')}
-      </button>`;
-    }).join('')}
-  </div>
-  <button type="button" class="btn btn-ghost btn-block add-ex" data-action="settings" data-focus="custom">${icon('plus')} Add your own exercise</button>`;
+  ${head('Log', esc(longDate(d)), lede)}
+  <div class="head-tools">${dateButton(d, 'log-date')}</div>
+  ${day ? `<section class="block block-tight">${sec(d === F.today() ? 'Logged today' : 'Logged on this day')}${dayBlock(day, S.prMap())}</section>` : ''}
+  <section class="block">
+    ${sec('Exercises', `<span class="sec-note">${plural(list.length, 'exercise')}</span>`)}
+    <div class="filters" role="tablist" aria-label="Muscle group">
+      ${cats.map((c) => `<button type="button" role="tab" aria-selected="${c === ui.logCat}" data-action="log-cat" data-cat="${esc(c)}">${esc(c)}</button>`).join('')}
+    </div>
+    <ul class="rows">
+      ${list.map((ex) => {
+        const n = daySets.filter((s) => s.ex === ex.id).length;
+        const last = S.lastSessionBefore(ex.id, d);
+        return `
+        <li><button type="button" class="row" data-action="open-ex" data-ex="${esc(ex.id)}">
+          <span class="row-no">${stationNo(ex.id)}</span>
+          <span><span class="row-name">${esc(ex.name)}</span><span class="row-meta">${esc(ex.cat)} · ${esc(ex.equip)}</span></span>
+          ${n
+            ? `<span class="row-val hot">${plural(n, 'set')}<small>${d === F.today() ? 'today' : 'this day'}</small></span>`
+            : last
+              ? `<span class="row-val">${esc(F.setText(last.top))}<small>${esc(F.ago(last.d))}</small></span>`
+              : '<span class="row-val dim">new<small>not logged</small></span>'}
+        </button></li>`;
+      }).join('')}
+    </ul>
+    <button type="button" class="text-btn" data-action="settings" data-focus="custom">Add an exercise that isn’t listed</button>
+  </section>`;
+}
+
+function trendLede(ex, m, sess, vals, range) {
+  const u = m.unit ? ` ${F.unit()}` : ' reps';
+  const span = range[3] ? `in ${range[3]}` : F.sinceDay(sess[0].d);
+  if (vals.length === 1) {
+    return `One ${esc(ex.name)} session ${esc(span)}: ${esc(m.label.toLowerCase())} <b>${m.fmt(vals[0])}${u}</b> ${esc(F.onDay(sess[0].d))}. Log another to see a trend.`;
+  }
+  const first = vals[0];
+  const last = vals[vals.length - 1];
+  const diff = last - first;
+  const sessions = `${plural(sess.length, 'session')} ${esc(span)}`;
+  if (Math.abs(diff) < 1e-9) return `${esc(m.label)} held at <b>${m.fmt(last)}${u}</b> across ${sessions}.`;
+  return `${esc(m.label)} <b>${diff > 0 ? 'up' : 'down'} ${m.fmt(Math.abs(diff))}${u}</b> across ${sessions}, from ${m.fmt(first)} to ${m.fmt(last)}${u}.`;
 }
 
 function viewProgress() {
   const ex = exerciseById(ui.progEx);
-  const metrics = METRICS[ex.kind === 'bodyweight' ? 'bodyweight' : 'weight'];
+  const bw = ex.kind === 'bodyweight';
+  const metrics = METRICS[bw ? 'bodyweight' : 'weight'];
   const m = metrics.find((x) => x.id === ui.progMetric) || metrics[0];
   const range = RANGES.find((r) => r[0] === ui.progRange) || RANGES[1];
   const cutoff = range[2] === Infinity ? '' : F.addDays(F.today(), -range[2]);
@@ -271,71 +346,62 @@ function viewProgress() {
   const sess = all.filter((s) => s.d >= cutoff);
   const vals = sess.map((s) => m.get(s));
   const u = m.unit ? F.unit() : 'reps';
-  const bw = ex.kind === 'bodyweight';
 
   const options = categories().map((c) => {
     const exs = allExercises().filter((e) => e.cat === c);
     return exs.length ? `<optgroup label="${esc(c)}">${exs.map((e) => `<option value="${esc(e.id)}"${e.id === ex.id ? ' selected' : ''}>${esc(e.name)}</option>`).join('')}</optgroup>` : '';
   }).join('');
 
+  let lede;
   let body;
   if (!sess.length) {
-    body = `
-    <section class="card empty-card">
-      <p>${all.length ? `No ${esc(ex.name)} sessions in the last ${esc(range[1])}. Try a longer range.` : `Log a few sessions of ${esc(ex.name)} and your progress chart appears here.`}</p>
-      <button type="button" class="btn" data-action="open-ex" data-ex="${esc(ex.id)}">${icon('plus')} Log ${esc(ex.name)}</button>
-    </section>`;
+    lede = all.length
+      ? `No ${esc(ex.name)} sessions in ${esc(range[3] || 'this range')}. The last one was ${esc(F.ago(all[all.length - 1].d))}; try a longer range.`
+      : `You haven’t logged ${esc(ex.name)} yet. After a couple of sessions this page charts it.`;
+    body = `<button type="button" class="btn" data-action="open-ex" data-ex="${esc(ex.id)}">Log ${esc(ex.name)}</button>`;
   } else {
-    const latest = vals[vals.length - 1];
+    lede = trendLede(ex, m, sess, vals, range);
     let bestI = 0;
     vals.forEach((v, i) => { if (v >= vals[bestI]) bestI = i; });
-    let change = `<div class="tile"><p class="tile-l">Change</p><p class="tile-v">—</p><p class="tile-s">Needs 2+ sessions</p></div>`;
-    if (vals.length > 1) {
-      const diff = latest - vals[0];
-      const dir = diff > 0 ? 'up' : diff < 0 ? 'down' : 'flat';
-      const pct = vals[0] > 0 ? `${diff >= 0 ? '+' : '−'}${Math.abs((diff / vals[0]) * 100).toFixed(0)}% · ` : '';
-      change = `
-        <div class="tile delta-${dir}"><p class="tile-l">Change</p>
-          <p class="tile-v">${dir === 'flat' ? '' : icon(dir, 'delta-ico')}${diff > 0 ? '+' : diff < 0 ? '−' : ''}${m.fmt(Math.abs(diff))}<small>${u}</small></p>
-          <p class="tile-s">${pct}since ${esc(F.shortDate(sess[0].d))}</p></div>`;
-    }
+    const pick = (s) => (bw ? s.maxRep : m.id === 'e1rm' ? s.e1rmSet : s.top);
+    const latest = sess[sess.length - 1];
     body = `
-    <div class="tiles3">
-      <div class="tile"><p class="tile-l">Latest</p><p class="tile-v">${m.fmt(latest)}<small>${u}</small></p><p class="tile-s">${esc(F.shortDate(sess[sess.length - 1].d))}</p></div>
-      <div class="tile"><p class="tile-l">Best</p><p class="tile-v">${m.fmt(vals[bestI])}<small>${u}</small></p><p class="tile-s">${esc(F.shortDate(sess[bestI].d))}</p></div>
-      ${change}
-    </div>
-    <section class="card chart-card">
-      <h2 class="eyebrow">${esc(m.label)} · ${u}</h2>
-      <div class="chart" id="prog-chart"></div>
-    </section>
-    <section class="card">
-      <h2 class="eyebrow">Sessions</h2>
-      <table class="tbl">
-        <thead><tr><th>Date</th><th>${bw ? 'Best set' : 'Top set'}</th><th>${bw ? 'Reps' : 'Est. 1RM'}</th><th>${bw ? 'Sets' : 'Volume'}</th></tr></thead>
+    <div class="chart" id="prog-chart"></div>
+    <dl class="facts">
+      <div><dt>Latest</dt><dd>${m.fmt(vals[vals.length - 1])} <small>${u}</small></dd><dd class="when">${esc(F.setText(pick(latest), true))}, ${esc(F.shortDate(latest.d))}</dd></div>
+      <div><dt>Best</dt><dd>${m.fmt(vals[bestI])} <small>${u}</small></dd><dd class="when">${esc(F.setText(pick(sess[bestI]), true))}, ${esc(F.shortDate(sess[bestI].d))}</dd></div>
+      ${sess.length > 1 ? `<div><dt>First in range</dt><dd>${m.fmt(vals[0])} <small>${u}</small></dd><dd class="when">${esc(F.setText(pick(sess[0]), true))}, ${esc(F.shortDate(sess[0].d))}</dd></div>` : ''}
+    </dl>
+    <section class="block">
+      ${sec('Every session', `<span class="sec-note">${plural(sess.length, 'session')}</span>`)}
+      <table class="log">
+        <thead><tr><th>Date</th><th>${bw ? 'Best set' : 'Top set'}</th><th class="r">${bw ? 'Reps' : 'e1RM'}</th><th class="r">${bw ? 'Sets' : `Vol. ${F.unit()}`}</th></tr></thead>
         <tbody>${sess.slice(-40).reverse().map((s) => `<tr>
-          <td>${esc(F.shortDate(s.d))}</td>
-          <td>${esc(F.setText(bw ? s.maxRep : s.top))}</td>
-          <td>${bw ? s.reps : F.w(s.e1rm)}</td>
-          <td>${bw ? s.sets.length : F.compact(s.volume)}</td></tr>`).join('')}</tbody>
+          <td class="dim">${esc(F.shortDate(s.d))}</td>
+          <td class="num">${esc(F.setText(bw ? s.maxRep : s.top))}</td>
+          <td class="r">${bw ? s.reps : F.w(s.e1rm)}</td>
+          <td class="r">${bw ? s.sets.length : F.whole(s.volume)}</td></tr>`).join('')}</tbody>
       </table>
     </section>`;
     const points = sess.map((s) => ({ x: F.parseDay(s.d).getTime(), y: m.unit ? F.toDisplay(m.get(s)) : m.get(s), sub: m.sub(s) }));
-    const short = (v) => (Math.abs(v) >= 1e4 ? `${F.num(v / 1000, 1)}K` : F.num(v, 1));
+    const short = (v) => (Math.abs(v) >= 1e4 ? `${F.num(v / 1000, 1)}k` : F.num(v, 1));
     onMount(() => lineChart($('#prog-chart'), points, {
       tick: short,
-      value: (v) => (m.unit ? `${short(v)} ${F.unit()}` : `${F.num(v, 0)} reps`),
-      label: `${ex.name} ${m.label} over the last ${range[1]}`,
+      value: (v) => (m.unit ? `${m.id === 'volume' ? F.num(v, 0) : F.num(v, 1)} ${F.unit()}` : `${F.num(v, 0)} reps`),
+      label: `${ex.name}, ${m.label}, ${range[3] || 'all time'}`,
     }));
   }
 
   return `
-  <header class="page-head"><div><p class="eyebrow">Progress</p><h1>Your lifts</h1></div></header>
-  <div class="field-select">
-    <select id="prog-ex" aria-label="Exercise">${options}</select>${icon('chevdown')}
-  </div>
-  ${seg('prog-range', RANGES.map((r) => [r[0], r[1]]), range[0], 'Time range')}
-  ${seg('prog-metric', metrics.map((x) => [x.id, x.label]), m.id, 'Metric')}
+  <header class="head">
+    <p class="kicker">Progress</p>
+    <label class="pick"><span class="vh">Exercise</span>
+      <select id="prog-ex">${options}</select><span class="pick-cue">Change</span>
+    </label>
+    <p class="lede">${lede}</p>
+  </header>
+  ${opts('prog-range', RANGES.map((r) => [r[0], r[1]]), range[0], 'Time range')}
+  ${opts('prog-metric', metrics.map((x) => [x.id, x.label]), m.id, 'Measure')}
   ${body}`;
 }
 
@@ -346,80 +412,78 @@ function viewPRs() {
   let bench;
   if (!b) {
     bench = `
-    <section class="card led hero-card">
-      <h2 class="eyebrow">${icon('trophy')} Flat bench press</h2>
-      <div class="hero hero-empty">—</div>
-      <p class="hero-sub">Log your first bench set to start your PR board.</p>
-      <button type="button" class="btn btn-primary btn-block" data-action="open-ex" data-ex="${BENCH_ID}">${icon('plus')} Log bench press</button>
-    </section>`;
+    ${head('Records', 'Bench press', 'No bench sets logged yet. Your first set becomes the baseline; every heavier set or higher estimated 1RM after it is a record.')}
+    <button type="button" class="act" data-action="open-ex" data-ex="${BENCH_ID}"><span>Log flat bench press</span><small>${stationNo(BENCH_ID)}</small></button>`;
   } else {
     const timeline = S.prTimeline(BENCH_ID).slice(0, 12);
-    const benchSessions = S.sessionsOf(BENCH_ID);
+    const firstSet = S.setsOf(BENCH_ID)[0];
+    const sessions = S.sessionsOf(BENCH_ID);
     bench = `
-    <section class="card led hero-card">
-      <div class="card-head">
-        <h2 class="eyebrow">${icon('trophy')} Flat bench press</h2>
-        <button type="button" class="pill" data-action="open-ex" data-ex="${BENCH_ID}">${icon('plus')} Log</button>
-      </div>
-      <div class="hero">${F.w(b.e1rm)}<span>${u}</span></div>
-      <p class="hero-sub">Best estimated 1RM · from ${esc(F.setText(b.est, true))} on ${esc(F.shortDate(b.est.d))}</p>
-      <div class="tiles2">
-        <div class="tile"><p class="tile-l">Heaviest set</p><p class="tile-v">${F.w(b.heavy.w)}<small>${u} × ${b.heavy.r}</small></p><p class="tile-s">${esc(F.shortDate(b.heavy.d))}</p></div>
-        <div class="tile"><p class="tile-l">Bench sessions</p><p class="tile-v">${b.days}</p><p class="tile-s">${plural(b.count, 'set')} logged</p></div>
-      </div>
-      <div class="goal">
-        <div class="goal-head"><span class="eyebrow">Goal · est. 1RM</span><button type="button" class="link" data-action="edit-goal">${icon('edit')} Edit goal</button></div>
-        ${goalMeter(b.e1rm, goal)}
-      </div>
+    ${head('Records', 'Bench press', `<b>${plural(b.days, 'session')}</b> and <b>${plural(b.count, 'set')}</b> ${esc(F.sinceDay(firstSet.d))}. Last benched ${esc(F.ago(b.last.d))}.`)}
+    <p class="figure"><span class="fig-n">${F.w(b.e1rm)}</span><span class="fig-u">${u}</span><span class="fig-l">est. 1RM</span></p>
+    <p class="fig-src">Epley estimate from ${esc(F.setText(b.est, true))} ${esc(F.onDay(b.est.d))}.</p>
+    <dl class="facts">
+      <div><dt>Heaviest set</dt><dd>${esc(F.setText(b.heavy, true))}</dd><dd class="when">${esc(F.shortDate(b.heavy.d))}</dd></div>
+      <div><dt>Goal</dt>${goal
+        ? `<dd>${esc(F.wu(goal))}</dd><dd class="when"><button type="button" class="text-btn inline" data-action="edit-goal">Edit</button></dd>`
+        : `<dd class="none">not set</dd><dd class="when"><button type="button" class="text-btn inline" data-action="edit-goal">Set one</button></dd>`}</div>
+    </dl>
+    ${goal ? `${goalStack(b.e1rm, goal)}<p class="note">${b.e1rm >= goal ? `Goal reached. Your estimate is ${esc(F.wu(b.e1rm - goal))} past it.` : `${esc(F.wu(goal - b.e1rm))} to go on your estimated 1RM.`}</p>` : ''}
+
+    <section class="block">
+      ${sec('Rep maxes')}
+      <table class="log">
+        <thead><tr><th>Reps</th><th>Heaviest for that many</th><th class="r">Date</th></tr></thead>
+        <tbody>${S.repMaxes(BENCH_ID).map(({ n, set }) => `<tr>
+          <td>${n}+</td><td class="num">${set ? esc(F.setText(set, true)) : '<span class="dim">none yet</span>'}</td><td class="r dim">${set ? esc(F.shortDate(set.d)) : ''}</td></tr>`).join('')}</tbody>
+      </table>
     </section>
-    <section class="card">
-      <h2 class="eyebrow">Rep maxes · ${u}</h2>
-      <div class="rm-grid">
-        ${S.repMaxes(BENCH_ID).map(({ n, set }) => `
-          <div class="rm"><p class="rm-n">${n}RM</p><p class="rm-v">${set ? F.w(set.w) : '—'}</p><p class="rm-d">${set ? esc(F.shortDate(set.d)) : '&nbsp;'}</p></div>`).join('')}
-      </div>
-      <p class="note">Heaviest weight you’ve benched for at least that many reps.</p>
-    </section>
-    <section class="card chart-card">
-      <h2 class="eyebrow">Est. 1RM over time · ${u}</h2>
+
+    <section class="block">
+      ${sec('Estimated 1RM by session', `<span class="sec-note">${u}</span>`)}
       <div class="chart" id="bench-chart"></div>
     </section>
-    <section class="card">
-      <h2 class="eyebrow">PR timeline</h2>
-      <ol class="timeline">
-        ${timeline.map(({ set, kinds, prev, e1rm }) => {
-          const tags = kinds[0] === 'first'
-            ? ['First logged']
-            : kinds.map((k) => (k === 'weight' ? `+${F.wu(set.w - prev.w)} heaviest` : `+${F.w(e1rm - prev.e)} e1RM`));
-          return `<li><span class="tl-dot"></span><div><p class="tl-main">${esc(F.setText(set, true))}</p><p class="tl-sub">${esc(F.shortDate(set.d))} · ${esc(tags.join(' · '))}</p></div><span class="tl-e">${F.w(e1rm)}<small>e1RM</small></span></li>`;
-        }).join('')}
-      </ol>
+
+    <section class="block">
+      ${sec('Record history', `<span class="sec-note">newest first</span>`)}
+      <table class="log">
+        <thead><tr><th>Date</th><th>Set</th><th class="r">e1RM</th><th class="r">Gain</th></tr></thead>
+        <tbody>${timeline.map(({ set, kinds, prev, e1rm }) => {
+          const gain = kinds[0] === 'first'
+            ? 'first set'
+            : kinds.map((k) => (k === 'weight' ? `+${F.w(set.w - prev.w)} top` : `+${F.w(e1rm - prev.e)} e1RM`)).join(', ');
+          return `<tr><td class="dim">${esc(F.shortDate(set.d))}</td><td class="num">${esc(F.setText(set))}</td><td class="r">${F.w(e1rm)}</td><td class="r gain">${esc(gain)}</td></tr>`;
+        }).join('')}</tbody>
+      </table>
     </section>`;
-    onMount(() => lineChart($('#bench-chart'), benchSessions.map((s) => ({ x: F.parseDay(s.d).getTime(), y: F.toDisplay(s.e1rm), sub: `From ${F.setText(s.e1rmSet, true)}` })), {
+    onMount(() => lineChart($('#bench-chart'), sessions.map((s) => ({ x: F.parseDay(s.d).getTime(), y: F.toDisplay(s.e1rm), sub: `From ${F.setText(s.e1rmSet, true)}` })), {
       tick: (v) => F.num(v, 1),
       value: (v) => `${F.num(v, 1)} ${u}`,
-      label: 'Bench press estimated one-rep max over time',
+      label: 'Bench press estimated one-rep max by session',
     }));
   }
 
   return `
-  <header class="page-head"><div><p class="eyebrow">Personal records</p><h1>PR board</h1></div></header>
   ${bench}
-  <h2 class="section-title">All exercises</h2>
-  <div class="ex-list">
-    ${allExercises().map((ex) => {
-      const best = S.bestsOf(ex.id);
-      const bw = ex.kind === 'bodyweight';
-      const meta = !best ? 'No sets yet' : bw ? `Best ${F.setText(best.reps, true)} · ${F.shortDate(best.reps.d)}` : `Est. 1RM ${F.wu(best.e1rm)} · ${F.shortDate(best.est.d)}`;
-      const big = !best ? '—' : bw ? `${best.reps.r}<small>reps</small>` : `${F.w(best.heavy.w)}<small>${u}</small>`;
-      return `
-      <button type="button" class="ex-card" data-action="view-progress" data-ex="${esc(ex.id)}">
-        ${exIcon(ex)}
-        <span class="ex-main"><span class="ex-name">${esc(ex.name)}</span><span class="ex-meta">${esc(meta)}</span></span>
-        <span class="pr-best">${big}</span>
-      </button>`;
-    }).join('')}
-  </div>`;
+  <section class="block">
+    ${sec('Every exercise', '<span class="sec-note">tap for progress</span>')}
+    <ul class="rows">
+      ${allExercises().map((ex) => {
+        const best = S.bestsOf(ex.id);
+        const bw = ex.kind === 'bodyweight';
+        const meta = !best ? 'Not logged yet' : bw ? `Most reps ${F.setText(best.reps, true)}, ${F.shortDate(best.reps.d)}` : `Est. 1RM ${F.wu(best.e1rm)}, ${F.shortDate(best.est.d)}`;
+        const val = !best ? '<span class="row-val dim">none</span>' : bw
+          ? `<span class="row-val">${best.reps.r}<small>reps</small></span>`
+          : `<span class="row-val">${esc(F.setText(best.heavy))}<small>heaviest</small></span>`;
+        return `
+        <li><button type="button" class="row" data-action="view-progress" data-ex="${esc(ex.id)}">
+          <span class="row-no">${stationNo(ex.id)}</span>
+          <span><span class="row-name">${esc(ex.name)}</span><span class="row-meta">${esc(meta)}</span></span>
+          ${val}
+        </button></li>`;
+      }).join('')}
+    </ul>
+  </section>`;
 }
 
 function viewHistory() {
@@ -428,8 +492,8 @@ function viewHistory() {
   const total = store.getState().sets.length;
   if (!days.length) {
     return `
-    <header class="page-head"><div><p class="eyebrow">History</p><h1>Every session</h1></div></header>
-    <section class="card empty-card"><p>No workouts yet. Sessions you log show up here, newest first.</p><a class="btn" href="#log">${icon('plus')} Log a workout</a></section>`;
+    ${head('History', 'No sessions yet', 'Each day you train appears here with every set, newest first. Tap a set later to fix a typo or delete it.')}
+    <a class="act" href="#log"><span>Log a workout</span></a>`;
   }
   let html = '';
   let month = '';
@@ -437,15 +501,17 @@ function viewHistory() {
     const ml = F.monthLabel(day.d);
     if (ml !== month) {
       month = ml;
-      html += `<h2 class="section-title">${esc(ml)}</h2>`;
+      const inMonth = days.filter((d) => F.monthLabel(d.d) === ml).length;
+      html += `<section class="block block-month">${sec(ml, `<span class="sec-note">${plural(inMonth, 'session')}</span>`)}`;
     }
-    html += dayCard(day, prs);
+    html += dayBlock(day, prs);
+    const next = days[days.indexOf(day) + 1];
+    if (!next || F.monthLabel(next.d) !== ml || days.indexOf(day) + 1 >= ui.historyLimit) html += '</section>';
   }
   return `
-  <header class="page-head"><div><p class="eyebrow">History</p><h1>Every session</h1></div><p class="head-meta">${plural(days.length, 'session')}<br>${plural(total, 'set')}</p></header>
-  <p class="note">Tap any set to edit or delete it.</p>
+  ${head('History', esc(plural(days.length, 'session')), `<b>${plural(total, 'set')}</b> ${esc(F.sinceDay(days[days.length - 1].d))}. Tap any set to edit or delete it.`)}
   ${html}
-  ${days.length > ui.historyLimit ? `<button type="button" class="btn btn-block" data-action="history-more">Show older sessions</button>` : ''}`;
+  ${days.length > ui.historyLimit ? `<button type="button" class="btn" data-action="history-more">Show ${Math.min(30, days.length - ui.historyLimit)} older sessions</button>` : ''}`;
 }
 
 const VIEWS = { home: viewHome, log: viewLog, progress: viewProgress, prs: viewPRs, history: viewHistory };
@@ -454,10 +520,7 @@ function render() {
   mounts = [];
   $('#view').innerHTML = VIEWS[ui.tab]();
   mounts.forEach((fn) => fn());
-  $('#tabbar').innerHTML = TABS.map((t) => `
-    <a href="#${t.id}" class="tab${t.center ? ' tab-center' : ''}"${ui.tab === t.id ? ' aria-current="page"' : ''}>
-      ${t.center ? `<span class="tab-fab">${icon('plus')}</span>` : icon(t.icon)}<span class="tab-l">${t.label}</span>
-    </a>`).join('');
+  $('#tabbar').innerHTML = TABS.map((t) => `<a href="#${t.id}" class="tab${t.primary ? ' tab-log' : ''}"${ui.tab === t.id ? ' aria-current="page"' : ''}>${t.label}</a>`).join('');
 }
 
 let queued = false;
@@ -494,7 +557,7 @@ function openSheet({ title, sub = '', body, cls = '', kind = '', onMount: mount 
       <header class="sheet-head">
         <div class="grab" aria-hidden="true"></div>
         <div><h2 id="sheet-title">${esc(title)}</h2>${sub ? `<p class="sheet-sub">${esc(sub)}</p>` : ''}</div>
-        <button type="button" class="icon-btn" data-close aria-label="Close">${icon('x')}</button>
+        <button type="button" class="text-btn" data-close>Close</button>
       </header>
       <div class="sheet-body">${body}</div>
     </section>`;
@@ -504,15 +567,15 @@ function openSheet({ title, sub = '', body, cls = '', kind = '', onMount: mount 
 
   // Drag the header down to dismiss, like a native sheet.
   const panel = $('.sheet', root);
-  const head = $('.sheet-head', root);
+  const header = $('.sheet-head', root);
   let y0 = null;
-  head.addEventListener('pointerdown', (e) => {
+  header.addEventListener('pointerdown', (e) => {
     if (e.target.closest('button')) return;
     y0 = e.clientY;
     panel.style.transition = 'none';
-    head.setPointerCapture(e.pointerId);
+    header.setPointerCapture(e.pointerId);
   });
-  head.addEventListener('pointermove', (e) => {
+  header.addEventListener('pointermove', (e) => {
     if (y0 !== null) panel.style.transform = `translateY(${Math.max(0, e.clientY - y0)}px)`;
   });
   const release = (e) => {
@@ -523,8 +586,8 @@ function openSheet({ title, sub = '', body, cls = '', kind = '', onMount: mount 
     panel.style.transform = '';
     if (dy > 90) closeSheet();
   };
-  head.addEventListener('pointerup', release);
-  head.addEventListener('pointercancel', release);
+  header.addEventListener('pointerup', release);
+  header.addEventListener('pointercancel', release);
 
   sheet = { root, kind, opener, cleanup: null };
   sheet.cleanup = mount?.(root) || null;
@@ -542,28 +605,41 @@ function closeSheet(immediate = false) {
   document.body.classList.remove('sheet-open');
   root.classList.remove('open');
   if (immediate) root.remove();
-  else setTimeout(() => root.remove(), 320);
+  else setTimeout(() => root.remove(), 280);
   if (opener && document.contains(opener)) opener.focus({ preventScroll: true });
+}
+
+// How a set compares with the same set number last session: "+2.5 kg", "+1 rep", "same".
+function versus(s, prev) {
+  if (!prev) return { text: '', cls: '' };
+  const dw = s.w - prev.w;
+  if (Math.abs(dw) > 1e-6) return { text: `${dw > 0 ? '+' : '−'}${F.wu(Math.abs(dw))}`, cls: dw > 0 ? 'up' : 'down' };
+  const dr = s.r - prev.r;
+  if (dr) return { text: `${dr > 0 ? '+' : '−'}${plural(Math.abs(dr), 'rep')}`, cls: dr > 0 ? 'up' : 'down' };
+  return { text: 'same', cls: '' };
 }
 
 function openLogger(exId) {
   const ex = exerciseById(exId);
   const bw = ex.kind === 'bodyweight';
   let d = logDate();
+  let freshId = null;
   const ref = S.setsOn(exId, d).at(-1) || S.lastSessionBefore(exId, d)?.top;
   const body = `
-    <div class="lg-bar">${datePicker(d, 'lg-date')}<span class="lg-e1rm" aria-live="polite"></span></div>
+    <div class="lg-top">${dateButton(d, 'lg-date')}<span class="lg-est" aria-live="polite"></span></div>
     <div class="lg-last"></div>
-    ${stepperHTML('lg-w', 'w', bw ? `Added weight · ${F.unit()}` : `Weight · ${F.unit()}`, ref ? inputW(ref.w) : bw ? '0' : '', ex.hint)}
-    ${stepperHTML('lg-r', 'r', 'Reps', ref ? ref.r : 8)}
-    <button type="button" class="btn btn-primary btn-xl lg-submit">${icon('check')}<span>Log set</span></button>
+    <div class="dials">
+      ${dial('lg-w', 'w', bw ? 'Added' : 'Weight', F.unit(), ref ? inputW(ref.w) : bw ? '0' : '', ex.hint)}
+      ${dial('lg-r', 'r', 'Reps', '', ref ? ref.r : 8)}
+    </div>
+    <button type="button" class="act lg-submit"><span class="lg-label">Log set</span><small class="lg-count"></small></button>
     <div class="rest rest-inline rest-ui" role="timer" aria-label="Rest timer" hidden>${restInner()}</div>
-    <h3 class="section-title lg-title"></h3>
-    <ol class="lg-sets"></ol>`;
+    <div class="lg-sets-head"></div>
+    <ol class="today-sets"></ol>`;
 
   openSheet({
     title: ex.name,
-    sub: `${ex.cat} · ${ex.equip}`,
+    sub: `${stationNo(ex.id)} · ${ex.cat} · ${ex.equip}`,
     body,
     cls: 'sheet-tall',
     kind: 'logger',
@@ -576,49 +652,60 @@ function openLogger(exId) {
       const refresh = () => {
         const sets = S.setsOn(exId, d);
         const prs = S.prMap();
-        $('.date-pill span', root).textContent = F.dayLabel(d);
-        $('.lg-title', root).textContent = `Sets · ${F.dayLabel(d)}`;
         const last = S.lastSessionBefore(exId, d);
+        const best = S.bestsOf(exId);
+        $('.date-btn span', root).textContent = F.dayLabel(d);
+        $('.lg-count', root).textContent = `set ${sets.length + 1}`;
         $('.lg-last', root).innerHTML = last
-          ? `<p class="eyebrow">Last time · ${esc(F.ago(last.d))} <span class="muted-n">tap to reuse</span></p>
-             <div class="set-chips">${last.sets.map((s) => `<button type="button" class="set-chip" data-fill="${esc(s.id)}">${esc(F.setText(s))}</button>`).join('')}</div>`
-          : `<p class="note">First time logging ${esc(ex.name)}${d === F.today() ? '' : ' before this date'} — this session is your baseline.</p>`;
-        $('.lg-sets', root).innerHTML = sets.length
-          ? sets.map((s, i) => `
-            <li>
-              <span class="set-n">${i + 1}</span>
-              <span class="set-main">${esc(F.setText(s, true))}</span>
-              ${prs.has(s.id) ? '<span class="badge-pr">PR</span>' : ''}
-              <span class="set-e">${bw ? '' : `e1RM ${F.w(S.e1rm(s.w, s.r))}`}</span>
-              <button type="button" class="icon-btn sm" data-del="${esc(s.id)}" aria-label="Delete set ${i + 1}">${icon('trash')}</button>
-            </li>`).join('')
-          : `<li class="empty">No sets logged ${d === F.today() ? 'yet today' : 'on this day'}.</li>`;
+          ? `${sec(`Last time · ${F.dayLabel(last.d)}`, '<span class="sec-note">tap a set to copy it</span>')}
+             <div class="sets">${last.sets.map((s) => `<button type="button" class="set" data-fill="${esc(s.id)}">${esc(F.setText(s))}</button>`).join('')}</div>`
+          : `<p class="note">First ${esc(ex.name)} session${d === F.today() ? '' : ' before this date'}. Whatever you log now is the baseline the next session is compared against.</p>`;
+        $('.lg-sets-head', root).innerHTML = sec(d === F.today() ? 'Today' : F.dayLabel(d), sets.length && last ? '<span class="sec-note">vs same set last time</span>' : '');
+        $('.today-sets', root).innerHTML = sets.length
+          ? sets.map((s, i) => {
+              const v = versus(s, last?.sets[i]);
+              return `
+              <li${s.id === freshId ? ' class="fresh"' : ''}>
+                <span class="ts-n">${i + 1}</span>
+                <span class="ts-set">${esc(F.setText(s, true))}${prs.has(s.id) ? '<span class="pr-tag">PR</span>' : ''}${bw ? '' : `<small>e1RM ${F.w(S.e1rm(s.w, s.r))}</small>`}</span>
+                <span class="ts-cmp ${v.cls}">${esc(v.text)}</span>
+                <button type="button" class="text-btn small" data-del="${esc(s.id)}" aria-label="Remove set ${i + 1}">Remove</button>
+              </li>`;
+            }).join('')
+          : `<li class="empty">No sets ${d === F.today() ? 'yet today' : 'on this day'}.</li>`;
         const w = parseNum($w.value);
         const r = parseNum($r.value);
         const est = !bw && w > 0 && Number.isInteger(r) && r > 0 ? S.e1rm(F.fromDisplay(w), r) : 0;
-        $('.lg-e1rm', root).innerHTML = est ? `Est. 1RM <b>${esc(F.wu(est))}</b>` : '';
+        $('.lg-est', root).innerHTML = est
+          ? `e1RM <b>${esc(F.w(est))}</b>${best && best.e1rm > 0 ? ` <span>/ best ${esc(F.w(best.e1rm))}</span>` : ''}`
+          : '';
       };
 
       const submit = () => {
         const v = readSet($w, $r);
         if (!v) return;
+        const before = S.bestsOf(exId);
         const set = store.addSet({ ex: exId, ...v, d });
+        freshId = set.id;
         askPersist();
-        if (S.prMap().has(set.id)) {
-          toast(`New PR! ${ex.name} · ${F.setText(set, true)}`, { kind: 'pr', duration: 4500 });
-          $btn.classList.add('pr-burst');
+        const kinds = S.prMap().get(set.id);
+        if (kinds && before) {
+          const parts = kinds.map((k) => (k === 'weight'
+            ? `Previous heaviest ${F.setText(before.heavy, true)}.`
+            : k === 'reps' ? `Previous most reps ${before.reps.r}.` : `Est. 1RM up from ${F.wu(before.e1rm)} to ${F.wu(S.e1rm(set.w, set.r))}.`));
+          toast(`${ex.name} ${F.setText(set, true)}. ${parts.join(' ')}`, { kind: 'pr', label: 'Record' });
         }
         $btn.classList.add('logged');
-        $('span', $btn).textContent = `Set ${S.setsOn(exId, d).length} logged`;
+        $('.lg-label', $btn).textContent = `Logged ${F.setText(set, true)}`;
         clearTimeout(flash);
         flash = setTimeout(() => {
-          $btn.classList.remove('logged', 'pr-burst');
-          $('span', $btn).textContent = 'Log set';
-        }, 1200);
+          $btn.classList.remove('logged');
+          $('.lg-label', $btn).textContent = 'Log set';
+        }, 1300);
         startRest(store.getState().settings.rest);
       };
 
-      wireSteppers(root, refresh);
+      wireDials(root, refresh);
       $btn.addEventListener('click', submit);
       $w.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); $r.focus(); } });
       $r.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); $r.blur(); submit(); } });
@@ -651,24 +738,24 @@ function openEditSet(id) {
   const bw = ex.kind === 'bodyweight';
   openSheet({
     title: 'Edit set',
-    sub: `${ex.name} · ${F.dayLabel(s.d)}`,
+    sub: `${ex.name} · ${F.dayLabel(s.d)} · logged as ${F.setText(s, true)}`,
     body: `
-      ${stepperHTML('es-w', 'w', bw ? `Added weight · ${F.unit()}` : `Weight · ${F.unit()}`, inputW(s.w))}
-      ${stepperHTML('es-r', 'r', 'Reps', s.r)}
+      <div class="dials">
+        ${dial('es-w', 'w', bw ? 'Added' : 'Weight', F.unit(), inputW(s.w))}
+        ${dial('es-r', 'r', 'Reps', '', s.r)}
+      </div>
       <label class="field"><span>Date</span><input class="input" type="date" id="es-d" value="${s.d}" max="${F.today()}"></label>
-      <div class="btn-row">
-        <button type="button" class="btn btn-danger" id="es-del">${icon('trash')} Delete</button>
-        <button type="button" class="btn btn-primary" id="es-save">${icon('check')} Save</button>
-      </div>`,
+      <button type="button" class="act" id="es-save"><span>Save changes</span></button>
+      <button type="button" class="btn btn-danger" id="es-del">Delete this set</button>`,
     onMount(root) {
-      wireSteppers(root);
+      wireDials(root);
       $('#es-save', root).addEventListener('click', () => {
         const v = readSet($('#es-w', root), $('#es-r', root));
         if (!v) return;
         const nd = $('#es-d', root).value;
         store.updateSet(id, { ...v, d: nd && nd <= F.today() ? nd : s.d });
         closeSheet();
-        toast('Set updated');
+        toast(`Saved: ${ex.name} ${F.setText({ ...s, ...v }, true)}.`);
       });
       $('#es-del', root).addEventListener('click', () => {
         closeSheet();
@@ -679,22 +766,34 @@ function openEditSet(id) {
 }
 
 function openGoal() {
-  const goal = store.getState().settings.benchGoal;
+  const { benchGoal } = store.getState().settings;
+  const b = S.bestsOf(BENCH_ID);
+  // Suggest the next 5 kg (10 lb) mark above the current estimate when no goal exists yet.
+  const stepD = F.unit() === 'lb' ? 10 : 5;
+  const suggestion = b ? F.fromDisplay(Math.ceil((F.toDisplay(b.e1rm) + 0.01) / stepD) * stepD) : null;
+  const start = benchGoal || suggestion;
   openSheet({
     title: 'Bench press goal',
-    sub: 'The estimated 1RM you’re chasing',
+    sub: b ? `Your estimated 1RM is ${F.wu(b.e1rm)}.` : 'Measured against your estimated 1RM.',
     body: `
-      ${stepperHTML('goal-w', 'w', `Goal · ${F.unit()}`, inputW(goal))}
-      <button type="button" class="btn btn-primary btn-xl" id="goal-save">${icon('check')}<span>Save goal</span></button>`,
+      <div class="dials dials-one">${dial('goal-w', 'w', 'Goal', F.unit(), start ? inputW(start) : '')}</div>
+      <button type="button" class="act" id="goal-save"><span>Save goal</span></button>
+      ${benchGoal ? '<button type="button" class="btn" id="goal-clear">Remove goal</button>' : ''}`,
     onMount(root) {
-      wireSteppers(root);
+      wireDials(root);
       $('#goal-save', root).addEventListener('click', () => {
         const input = $('#goal-w', root);
         const v = parseNum(input.value);
-        if (!(v > 0)) return invalid(input, 'Enter a goal above 0');
+        if (!(v > 0)) return invalid(input, 'Enter a goal above 0.');
         store.setSetting('benchGoal', F.fromDisplay(v));
         closeSheet();
-        toast(`Goal set · ${F.wu(F.fromDisplay(v))}`);
+        refreshSettings();
+        toast(`Bench goal set to ${F.wu(F.fromDisplay(v))}.`);
+      });
+      $('#goal-clear', root)?.addEventListener('click', () => {
+        store.setSetting('benchGoal', null);
+        closeSheet();
+        toast('Bench goal removed.');
       });
     },
   });
@@ -705,43 +804,52 @@ function settingsBody() {
   const { unit, rest, benchGoal } = st.settings;
   return `
     <section class="set-group">
-      <h3 class="eyebrow">Units</h3>
-      ${seg('set-unit', [['kg', 'Kilograms'], ['lb', 'Pounds']], unit, 'Units')}
+      ${sec('Units')}
+      ${opts('set-unit', [['kg', 'Kilograms'], ['lb', 'Pounds']], unit, 'Units')}
+      <p class="note">Steppers move in ${unit === 'lb' ? '5 lb' : '2.5 kg'} jumps. Everything is stored in kilograms, so switching never loses precision.</p>
     </section>
     <section class="set-group">
-      <h3 class="eyebrow">Rest timer after each set</h3>
-      ${seg('set-rest', [[0, 'Off'], [60, '60s'], [90, '90s'], [120, '2m'], [180, '3m']], rest, 'Rest timer')}
+      ${sec('Rest timer')}
+      ${opts('set-rest', [[0, 'Off'], [60, '1:00'], [90, '1:30'], [120, '2:00'], [180, '3:00']], rest, 'Rest timer')}
+      <p class="note">Starts when you log a set.</p>
     </section>
     <section class="set-group">
-      <h3 class="eyebrow">Bench press goal</h3>
-      <button type="button" class="row-btn" data-action="edit-goal"><span>Est. 1RM goal</span><b>${esc(F.wu(benchGoal))}</b>${icon('chev')}</button>
+      ${sec('Bench press goal')}
+      <button type="button" class="row row-plain" data-action="edit-goal">
+        <span><span class="row-name">Estimated 1RM goal</span><span class="row-meta">Shown on Today and Records</span></span>
+        <span class="row-val">${benchGoal ? esc(F.wu(benchGoal)) : '<span class="dim">not set</span>'}</span>
+      </button>
     </section>
     <section class="set-group" id="custom">
-      <h3 class="eyebrow">Your own exercises</h3>
-      ${st.custom.length ? `<ul class="custom-list">${st.custom.map((c) => `
-        <li><span><b>${esc(c.name)}</b><small>${esc(c.cat)} · ${c.kind === 'bodyweight' ? 'Bodyweight' : 'Weighted'}</small></span>
-        <button type="button" class="icon-btn sm" data-action="del-custom" data-id="${esc(c.id)}" aria-label="Delete ${esc(c.name)}">${icon('trash')}</button></li>`).join('')}</ul>` : ''}
+      ${sec('Your own exercises', st.custom.length ? `<span class="sec-note">${st.custom.length}</span>` : '')}
+      ${st.custom.length ? `<ul class="rows">${st.custom.map((c) => `
+        <li class="row row-static">
+          <span class="row-no">${stationNo(c.id)}</span>
+          <span><span class="row-name">${esc(c.name)}</span><span class="row-meta">${esc(c.cat)} · ${c.kind === 'bodyweight' ? 'bodyweight' : 'weighted'}</span></span>
+          <button type="button" class="text-btn small" data-action="del-custom" data-id="${esc(c.id)}">Delete</button>
+        </li>`).join('')}</ul>` : ''}
       <form class="add-form" data-form="custom">
-        <input class="input" name="name" placeholder="Exercise name, e.g. Leg Press" maxlength="40" required autocomplete="off" aria-label="Exercise name">
+        <label class="field"><span>Name</span><input class="input" name="name" placeholder="e.g. Leg Press" maxlength="40" required autocomplete="off"></label>
         <div class="row2">
-          <select class="input" name="cat" aria-label="Muscle group">${[...CATEGORIES, 'Legs', 'Core', 'Other'].map((c) => `<option>${c}</option>`).join('')}</select>
-          <select class="input" name="kind" aria-label="Type"><option value="weight">Weighted</option><option value="bodyweight">Bodyweight</option></select>
+          <label class="field"><span>Muscle group</span><select class="input" name="cat">${[...CATEGORIES, 'Legs', 'Core', 'Other'].map((c) => `<option>${c}</option>`).join('')}</select></label>
+          <label class="field"><span>Load</span><select class="input" name="kind"><option value="weight">Weighted</option><option value="bodyweight">Bodyweight</option></select></label>
         </div>
-        <button class="btn btn-block">${icon('plus')} Add exercise</button>
+        <button class="btn">Add exercise</button>
       </form>
     </section>
     <section class="set-group">
-      <h3 class="eyebrow">Backup</h3>
-      <p class="note">Your log is saved on this phone only. Export a backup now and then, and before switching phones.</p>
-      <div class="btn-row">
-        <button type="button" class="btn" data-action="export">${icon('download')} Export</button>
-        <label class="btn">${icon('upload')} Import<input class="visually-hidden" type="file" accept=".json,application/json" id="import-file"></label>
+      ${sec('Backup')}
+      <p class="note">Your ${plural(st.sets.length, 'set')} live on this phone only. Export a copy now and then, and before switching phones.</p>
+      <div class="btn-pair">
+        <button type="button" class="btn" data-action="export">Export file</button>
+        <label class="btn">Import file<input class="vh" type="file" accept=".json,application/json" id="import-file"></label>
       </div>
     </section>
     <section class="set-group">
-      <button type="button" class="btn btn-danger btn-block" data-action="reset">${icon('trash')} Reset all data</button>
+      ${sec('Reset')}
+      <button type="button" class="btn btn-danger" data-action="reset">Delete all data on this phone</button>
     </section>
-    <p class="about">Novo Tracker · ${plural(st.sets.length, 'set')} logged<br>Unofficial personal tracker, themed on Novo Gym Welling. Works offline.</p>`;
+    <p class="about">Novo Tracker is an unofficial personal log, styled after Novo Gym Welling. It keeps working offline once installed.</p>`;
 }
 
 function openSettings(focus) {
@@ -757,11 +865,10 @@ function refreshSettings() {
 const rest = { end: 0, total: 0, timer: 0, buzzed: false };
 
 const restInner = () => `
-  <span class="rest-ico">${icon('timer')}</span>
   <span class="rest-l">Rest</span>
   <span class="rest-t">0:00</span>
-  <button type="button" data-action="rest-add" aria-label="Add 30 seconds">+30s</button>
-  <button type="button" class="rest-x" data-action="rest-stop" aria-label="Stop rest timer">${icon('x')}</button>
+  <button type="button" data-action="rest-add" aria-label="Add 30 seconds">+0:30</button>
+  <button type="button" data-action="rest-stop">Stop</button>
   <i class="rest-bar"></i>`;
 
 function startRest(sec) {
@@ -791,8 +898,8 @@ function tickRest() {
   els.forEach((el) => {
     el.hidden = false;
     el.classList.toggle('done', done);
-    $('.rest-l', el).textContent = done ? 'Rest done' : 'Rest';
-    $('.rest-t', el).textContent = done ? 'Go!' : `${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, '0')}`;
+    $('.rest-l', el).textContent = done ? 'Rest over' : 'Rest';
+    $('.rest-t', el).textContent = done ? 'Next set' : `${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, '0')}`;
     $('.rest-bar', el).style.width = done ? '100%' : `${(1 - left / rest.total) * 100}%`;
   });
   if (done && !rest.buzzed) {
@@ -805,22 +912,20 @@ function tickRest() {
 
 // ---------- Toast ----------
 let toastTimer;
-function toast(msg, { kind = '', action, duration = 3000 } = {}) {
+function toast(msg, { kind = '', label = '', action, duration } = {}) {
   const t = $('#toast');
-  t.className = `toast ${kind}`;
-  t.innerHTML = `${kind === 'pr' ? icon('trophy') : ''}<span></span>${action ? `<button type="button">${esc(action.label)}</button>` : ''}`;
-  $('span', t).textContent = msg;
+  t.className = `toast show ${kind}`;
+  t.innerHTML = `<p>${label ? `<span class="t-kind">${esc(label)}</span>` : ''}<span class="t-msg"></span></p>${action ? `<button type="button" class="text-btn">${esc(action.label)}</button>` : ''}`;
+  $('.t-msg', t).textContent = msg;
   if (action) $('button', t).addEventListener('click', () => { action.fn(); hideToast(); });
-  void t.offsetWidth;
-  t.classList.add('show');
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(hideToast, duration);
+  toastTimer = setTimeout(hideToast, duration || (kind === 'pr' ? 5000 : 3200));
 }
 const hideToast = () => $('#toast').classList.remove('show');
 
 function deleteWithUndo(id) {
   const removed = store.deleteSet(id);
-  if (removed) toast('Set deleted', { action: { label: 'Undo', fn: () => store.restoreSet(removed) }, duration: 5000 });
+  if (removed) toast(`Removed ${exerciseById(removed.ex).name} ${F.setText(removed, true)}.`, { action: { label: 'Undo', fn: () => store.restoreSet(removed) }, duration: 5000 });
 }
 
 let persistAsked = false;
@@ -859,7 +964,7 @@ async function importBackup(input) {
     if (!confirm(`Replace your current log (${plural(cur, 'set')}) with this backup (${plural(next.sets.length, 'set')})?`)) return;
     store.replaceAll(next);
     closeSheet();
-    toast(`Backup restored · ${plural(next.sets.length, 'set')}`);
+    toast(`Backup restored: ${plural(next.sets.length, 'set')}.`);
   } catch (err) {
     toast(err instanceof SyntaxError ? 'That file isn’t valid JSON.' : err.message);
   }
@@ -889,11 +994,12 @@ const actions = {
   'set-rest': (el) => { store.setSetting('rest', Number(el.dataset.v)); refreshSettings(); },
   export: () => exportBackup(),
   reset: () => {
-    if (!confirm('Delete every logged set and custom exercise? This can’t be undone — export a backup first if unsure.')) return;
+    const n = store.getState().sets.length;
+    if (!confirm(`Delete all ${plural(n, 'set')} and your custom exercises from this phone? This can’t be undone, so export a backup first if you’re unsure.`)) return;
     store.resetAll();
     stopRest();
     closeSheet();
-    toast('All data cleared');
+    toast(`Deleted ${plural(n, 'set')}.`);
   },
   'del-custom': (el) => {
     const id = el.dataset.id;
@@ -933,11 +1039,11 @@ document.addEventListener('submit', (e) => {
   e.preventDefault();
   const data = new FormData(form);
   const name = String(data.get('name') || '').trim();
-  if (!name) return toast('Give the exercise a name');
-  if (allExercises().some((x) => x.name.toLowerCase() === name.toLowerCase())) return toast('You already have an exercise with that name');
-  store.addCustomExercise({ name, cat: String(data.get('cat')), kind: data.get('kind') === 'bodyweight' ? 'bodyweight' : 'weight' });
+  if (!name) return toast('Give the exercise a name.');
+  if (allExercises().some((x) => x.name.toLowerCase() === name.toLowerCase())) return toast(`${name} is already in your list.`);
+  const ex = store.addCustomExercise({ name, cat: String(data.get('cat')), kind: data.get('kind') === 'bodyweight' ? 'bodyweight' : 'weight' });
   refreshSettings();
-  toast(`${name} added to your exercises`);
+  toast(`Added ${name} as station ${stationNo(ex.id)}.`);
 });
 
 document.addEventListener('keydown', (e) => {

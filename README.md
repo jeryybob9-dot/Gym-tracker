@@ -1,17 +1,23 @@
 # Novo Tracker
 
-A dark-mode gym progress tracker for iPhone, themed on Novo Gym Welling: black kit, the orange feature wall, and the cyan/blue/pink LED strips.
+A dark gym log for iPhone, styled after Novo Gym Welling: matte black Primal kit, rubber-floor charcoal, chalk-white type and the burnt-orange feature wall. Orange is the only accent colour, and it always means "do this" or "record".
 
 **Live app:** https://jeryybob9-dot.github.io/Gym-tracker/ (once GitHub Pages is switched on; see below)
 
+| Today | Logging a set | Progress | Records |
+| --- | --- | --- | --- |
+| ![Today screen](docs/screenshots/today.png) | ![Set logger](docs/screenshots/log-set.png) | ![Progress chart](docs/screenshots/progress.png) | ![Bench press records](docs/screenshots/records.png) |
+
+These are real screenshots of the app, filled with ten weeks of generated sample training.
+
 ## What it does
 
-- **Set logger**: pick an exercise, set weight and reps with big +/− steppers, then tap **Log set**. It shows last session's sets (tap one to reuse it), a live estimated 1RM and a rest timer, and you can backfill past dates.
-- **Progress charts**: per exercise, chart top set, estimated 1RM or volume (max reps, added weight or total reps for bodyweight moves) over 1M / 3M / 6M / 1Y / All. Drag along the chart to read any session.
-- **Bench press PR board**: best estimated 1RM, heaviest set, a goal meter, rep maxes (1/3/5/8/10RM), a PR timeline and an e1RM chart.
-- **PR badges**: any set that beats your previous best gets flagged, and you get a "New PR!" alert as you log it.
+- **Log**: pick an exercise and set weight and reps with the −2.5 / +2.5 and −1 / +1 steppers. Last session's sets sit above the inputs (tap one to copy it), and each set you log is compared with the same set last time (+2.5 kg, +1 rep, same). There's a rest timer, and you can backfill past dates.
+- **Progress**: charts each exercise by top set, estimated 1RM or volume (max reps, added weight or total reps for bodyweight moves) over 1M / 3M / 6M / 1Y / All. The headline is written from your numbers, e.g. "Top set up 17.5 kg across 21 sessions in the last 3 months". Drag along the chart to read any session; every session is also in the table below it.
+- **Records**: bench press estimated 1RM, heaviest set, an optional goal drawn as 10 kg blocks, rep maxes, a record history and an e1RM chart. Below that, the best for every other exercise.
+- **Record alerts**: a set that beats your previous best is marked PR, and the alert says exactly what it beat.
+- **Today**: this week's training days, sets and total kilos moved, your bench numbers, the exercises you've gone longest without, and your last two sessions.
 - **History**: every session by month. Tap a set to edit or delete it.
-- **Home**: this week's sessions, sets and volume, your weekly streak and recent sessions.
 - **Settings**: kg/lb, rest timer length, bench goal, your own extra exercises, and backup export/import.
 
 Exercises included: Low Pulley Row, Pull Ups, T-Bar Row, Muscle Ups, Cable Bicep Curls, Preacher Curls, Tricep Push Down, Seated Tricep Dips, Primal Chest Press, Pec Deck, Flat Bench Press and Viking Press.
@@ -45,12 +51,14 @@ npx http-server -p 8080 .
 | File | Purpose |
 | --- | --- |
 | `index.html` | App shell and iPhone web-app meta tags |
-| `styles.css` | Theme and layout |
+| `styles.css` | Palette, type and layout |
+| `fonts/` | Barlow Condensed (signage and numbers) and IBM Plex Sans (text), both under the SIL Open Font License and bundled so they work offline |
 | `js/app.js` | Screens, sheets, rest timer, events |
 | `js/store.js` | Local storage, backup import/export |
 | `js/stats.js` | e1RM (Epley), sessions, PR detection, streaks |
 | `js/chart.js` | SVG progress chart with touch scrubbing |
 | `js/exercises.js` | Exercise list |
 | `sw.js` | Offline support (network first, cached fallback) |
+| `docs/screenshots/` | README screenshots |
 
 Novo Tracker is an unofficial personal project and isn't affiliated with Novo Gym.

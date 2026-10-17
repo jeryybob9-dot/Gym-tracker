@@ -1,6 +1,6 @@
 // Offline support. Network first (so a new deploy shows up straight away),
 // falling back to the cached copy when the gym signal drops.
-const CACHE = 'novo-tracker-v1';
+const CACHE = 'novo-tracker-v2';
 const SHELL = [
   './',
   './index.html',
@@ -12,7 +12,10 @@ const SHELL = [
   './js/format.js',
   './js/exercises.js',
   './js/chart.js',
-  './js/icons.js',
+  './fonts/barlow-condensed-500.woff2',
+  './fonts/barlow-condensed-600.woff2',
+  './fonts/ibm-plex-sans-400.woff2',
+  './fonts/ibm-plex-sans-600.woff2',
   './icons/favicon.svg',
   './icons/apple-touch-icon.png',
   './icons/icon-192.png',
